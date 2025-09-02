@@ -1,0 +1,195 @@
+<div class="chat-container w-full max-w-3xl flex flex-col h-[calc(100vh-8rem)]">
+    <div class="chat-body flex-1 overflow-y-auto p-4" id="chat-body">
+        <div class="chat-message bot">
+            <div class="avatar"><i class="fas fa-robot"></i></div>
+            <div class="message-bubble">Sou seu assistente de Service Desk. Como posso ajudar hoje? Tente 'Encerrar chamado <ID>', 'Sugerir solução para <problema>', ou faça uma pergunta!</div>
+        </div>
+    </div>
+    <div class="chat-footer p-4 bg-white dark:bg-gray-800 shadow-inner">
+        <div class="typing-indicator" id="typing-indicator" style="display: none;">
+            <span>Digitando...</span>
+        </div>
+        <div class="flex items-center space-x-2">
+            <textarea id="chat-input" class="chat-input flex-1" rows="2" placeholder="Digite sua mensagem..."></textarea>
+            <button onclick="enviarMensagem()" class="chat-button">Enviar</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const chatBody = document.getElementById('chat-body');
+    const chatInput = document.getElementById('chat-input');
+    const typingIndicator = document.getElementById('typing-indicator');
+    let chatState = 'normal';
+    let lastOptions = [];
+
+    async function enviarMensagem() {
+        const mensagem = chatInput.value.trim();
+        if (!mensagem) return;
+
+        adicionarMensagem(mensagem, 'user');
+        chatInput.value = '';
+        chatBody.scrollTop = chatBody.scrollHeight;
+
+        const statusMessage = adicionarMensagem('Buscando no banco de dados...', 'bot', true, null, true);
+        chatBody.scrollTop = chatBody.scrollHeight;
+
+        try {
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mensagem: mensagem })
+            });
+            const data = await response.json();
+            chatBody.removeChild(statusMessage);
+            adicionarMensagem(data.text, 'bot', data.html, data.options);
+            chatState = data.state || 'normal';
+            if (chatState === 'faq_selection') {
+                chatInput.placeholder = 'Clique em uma FAQ acima ou digite uma nova mensagem...';
+            } else {
+                chatInput.placeholder = 'Digite sua mensagem...';
+            }
+        } catch (error) {
+            chatBody.removeChild(statusMessage);
+            adicionarMensagem('Erro ao processar a solicitação.', 'bot');
+        } finally {
+            typingIndicator.style.display = 'none';
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+    }
+
+    async function selecionarFAQ(faqId) {
+        const statusMessage = adicionarMensagem('Buscando no banco de dados...', 'bot', true, null, true);
+        chatBody.scrollTop = chatBody.scrollHeight;
+
+        try {
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mensagem: `faq_${faqId}` })
+            });
+            const data = await response.json();
+            chatBody.removeChild(statusMessage);
+            adicionarMensagem(data.text, 'bot', data.html, data.options);
+            chatState = data.state || 'normal';
+            chatInput.placeholder = chatState === 'faq_selection' ? 'Clique em uma FAQ acima ou digite uma nova mensagem...' : 'Digite sua mensagem...';
+        } catch (error) {
+            chatBody.removeChild(statusMessage);
+            adicionarMensagem('Erro ao processar a solicitação.', 'bot');
+        } finally {
+            chatBody.scrollTop = chatBody.scrollHeight;
+        }
+    }
+
+    function adicionarMensagem(texto, tipo, isHtml = false, options = [], isSearching = false) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${tipo} mb-4 flex items-start`;
+        const avatarDiv = document.createElement('div');
+        avatarDiv.className = 'avatar mr-2';
+        avatarDiv.innerHTML = tipo === 'user' ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>';
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = 'message-bubble bg-gray-100 dark:bg-gray-700 p-3 rounded-lg w-full';
+        if (isHtml) {
+            if (isSearching) {
+                bubbleDiv.innerHTML = `
+                    <div class="flex items-center">
+                        <svg class="animate-tech mr-2" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20Z" fill="currentColor"/>
+                            <path d="M12 6V9L15 12L12 15V18C15.31 18 18 15.31 18 12C18 8.69 15.31 6 12 6Z" fill="currentColor"/>
+                            <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
+                        </svg>
+                        <span>Buscando no banco de dados...</span>
+                    </div>
+                `;
+            } else {
+                bubbleDiv.innerHTML = texto;
+                const videos = bubbleDiv.querySelectorAll('video, iframe');
+                videos.forEach(video => {
+                    video.style.maxWidth = '100%';
+                    video.style.height = 'auto';
+                });
+                const images = bubbleDiv.querySelectorAll('img');
+                images.forEach(image => {
+                    image.style.maxWidth = '100%';
+                    image.style.height = 'auto';
+                });
+                const links = bubbleDiv.querySelectorAll('a');
+                links.forEach(link => {
+                    link.className = 'text-blue-600 dark:text-blue-400 hover:underline flex items-center space-x-1';
+                });
+            }
+        } else {
+            bubbleDiv.textContent = texto;
+        }
+
+        if (options && options.length > 0) {
+            const optionsString = JSON.stringify(options);
+            if (optionsString !== JSON.stringify(lastOptions)) {
+                const optionsDiv = document.createElement('div');
+                optionsDiv.className = 'mt-2 space-y-2';
+                options.forEach(option => {
+                    const button = document.createElement('button');
+                    button.className = 'w-full text-left px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition';
+                    button.textContent = option.question;
+                    button.onclick = () => selecionarFAQ(option.id);
+                    optionsDiv.appendChild(button);
+                });
+                bubbleDiv.appendChild(optionsDiv);
+                lastOptions = options;
+            }
+        }
+
+        messageDiv.appendChild(tipo === 'user' ? bubbleDiv : avatarDiv);
+        messageDiv.appendChild(tipo === 'user' ? avatarDiv : bubbleDiv);
+        chatBody.appendChild(messageDiv);
+        return messageDiv;
+    }
+
+    chatInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            enviarMensagem();
+        }
+    });
+
+    window.addEventListener('load', () => {
+        chatBody.scrollTop = chatBody.scrollHeight;
+    });
+</script>
+
+<style>
+    .chat-input:focus {
+        outline: none;
+    }
+    .typing-indicator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .animate-tech {
+        animation: techSpin 1.5s linear infinite;
+    }
+    @keyframes techSpin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    @media (max-width: 768px) {
+        .chat-container {
+            max-width: 100%;
+            height: calc(100vh - 4rem);
+        }
+        .chat-body {
+            padding: 1rem;
+        }
+        .chat-footer {
+            padding: 1rem;
+        }
+        .message-bubble {
+            max-width: 90% !important;
+        }
+        .chat-button {
+            width: 70px;
+            padding: 0.5rem;
+        }
+    }
+</style>
